@@ -1,0 +1,6 @@
+# Install these while the Raspberry Pi has network access, then deploy/run offline.
+numpy>=1.24
+scipy>=1.10
+gpiozero>=2.0
+smbus2>=0.4
+requests>=2.31
