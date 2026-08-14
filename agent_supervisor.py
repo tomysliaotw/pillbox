@@ -1,21 +1,24 @@
-"""Offline-safe tool dispatcher for a local LLM or a future voice interface.
+"""Offline-safe tool dispatcher and Llama LLM integration for smart pillbox.
 
-This module deliberately exposes actions, not arbitrary Python execution. A
-language model can request one of these tools, but health thresholds remain in
-the deterministic health-analysis node.
+Exposes supervisor actions and manages short/long-term memory in memory.db.
 """
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
+from llama_agent import LlamaLLMAgent
+from memory_manager import MemoryManager
 from nodes.tfda_sync_node import import_tfda_archive
 from pillbox_config import DB_PATH, TFDA_ARCHIVE_PATH, shared_state
 from pillbox_database import connect, initialize_database
 
 
 class AgentSupervisor:
-    def __init__(self):
+    def __init__(self, session_id: str = "default"):
         initialize_database()
+        self.session_id = session_id
+        self.memory_manager = MemoryManager(session_id=session_id)
+        self.llama_agent = LlamaLLMAgent()
         self.tools: dict[str, Callable[..., dict[str, Any]]] = {
             "get_system_status": self.get_system_status,
             "read_vitals": self.read_vitals,
@@ -30,6 +33,42 @@ class AgentSupervisor:
         if tool_name not in self.tools:
             raise ValueError(f"Tool is not approved: {tool_name}")
         return self.tools[tool_name](**(arguments or {}))
+
+    def process_user_message(self, user_input: str, session_id: str | None = None) -> str:
+        target_session = session_id or self.session_id
+        
+        # 1. Store user message in short-term memory (memory.db)
+        self.memory_manager.add_message(role="user", content=user_input, session_id=target_session)
+
+        # 2. Retrieve short-term messages and long-term memory summary from memory.db
+        short_term = self.memory_manager.get_short_term_memory(session_id=target_session, limit=10)
+        long_term_summary = self.memory_manager.get_long_term_memory(session_id=target_session)
+
+        # 3. Generate model response and execute tool calls via dispatch
+        response_text, tool_call, tool_result = self.llama_agent.generate_response(
+            user_input=user_input,
+            short_term_messages=short_term,
+            long_term_summary=long_term_summary,
+            dispatch_fn=self.dispatch,
+        )
+
+        # 4. Store assistant response and tool metadata into memory.db
+        self.memory_manager.add_message(
+            role="assistant",
+            content=response_text,
+            tool_calls=tool_call,
+            tool_results=tool_result,
+            session_id=target_session,
+        )
+
+        # 5. Automatically summarize conversation into long-term memory if history grows
+        self.memory_manager.summarize_and_compress(
+            summarize_fn=self.llama_agent.summarize,
+            trigger_threshold=8,
+            session_id=target_session,
+        )
+
+        return response_text
 
     @staticmethod
     def get_system_status() -> dict[str, Any]:

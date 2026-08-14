@@ -1,6 +1,7 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, simpledialog
 import sqlite3
+from agent_supervisor import AgentSupervisor
 import time
 from datetime import datetime
 import re
@@ -341,6 +342,7 @@ class SmartPillboxApp:
         self.db_path = "smart_pillbox.db"
         self.search_timer = None
         self.active_entry = None
+        self.supervisor = AgentSupervisor()
         
         self.setup_styles()
         
@@ -371,16 +373,25 @@ class SmartPillboxApp:
         self.active_entry = entry_widget
         self.show_keyboard()
 
+    def open_ai_assistant_dialog(self):
+        prompt = simpledialog.askstring("🤖 Llama AI 醫療語音/對話", "請輸入指令 (例如: 設定 08:30 第 1 格吃降血壓藥 / 查詢生理指標 / 查藥 阿斯匹靈):")
+        if prompt and prompt.strip():
+            reply = self.supervisor.process_user_message(prompt.strip())
+            self.refresh_upcoming_schedule()
+            messagebox.showinfo("🤖 AI 回應", reply)
+
     # ---------------- 畫面一：主監控儀表板 (緊湊化設計) ----------------
     def build_main_page(self):
         # 💡 先把底部按鈕釘死在最下面，防止被擠出畫面
         btn_frame = tk.Frame(self.main_page, bg=BG_DARK)
         btn_frame.pack(side="bottom", fill="x", pady=10, padx=15)
         
+        btn_ai = ttk.Button(btn_frame, text="🤖 AI 助手", style="Primary.TButton", command=self.open_ai_assistant_dialog)
+        btn_ai.pack(side="left", expand=True, fill="x", padx=(0, 2))
         btn_setting = ttk.Button(btn_frame, text="➕ 管理排程", style="Primary.TButton", command=self.switch_to_schedule)
-        btn_setting.pack(side="left", expand=True, fill="x", padx=(0, 5))
-        btn_take = ttk.Button(btn_frame, text="✔ 確認拿藥 (熄燈)", style="Success.TButton", command=self.confirm_medication)
-        btn_take.pack(side="right", expand=True, fill="x", padx=(5, 0))
+        btn_setting.pack(side="left", expand=True, fill="x", padx=(2, 2))
+        btn_take = ttk.Button(btn_frame, text="✔ 確認拿藥", style="Success.TButton", command=self.confirm_medication)
+        btn_take.pack(side="right", expand=True, fill="x", padx=(2, 0))
 
         # 頂部時間區塊
         header_frame = tk.Frame(self.main_page, bg=BG_DARK)
