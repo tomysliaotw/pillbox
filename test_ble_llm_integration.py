@@ -82,7 +82,7 @@ def test_chat_message():
     mock_supervisor = MagicMock()
     mock_supervisor.process_user_message.return_value = fake_reply
 
-    with patch.object(ble_mod, "_supervisor", mock_supervisor):
+    with patch("nodes.ble_receiver_node._supervisor", mock_supervisor):
         raw = json.dumps({"id": "t1", "type": "chat", "text": "設定 08:30 第1格吃降血壓藥", "session_id": "test"}).encode()
         cmd._handle(raw)
 
@@ -121,7 +121,7 @@ def test_vitals_message():
     mock_supervisor = MagicMock()
     mock_supervisor.dispatch.return_value = {"bpm": 72.0, "spo2": 98.0, "temp": 36.5}
 
-    with patch.object(ble_mod, "_supervisor", mock_supervisor):
+    with patch("nodes.ble_receiver_node._supervisor", mock_supervisor):
         raw = json.dumps({"id": "t2", "type": "vitals"}).encode()
         cmd._handle(raw)
 
@@ -157,7 +157,7 @@ def test_schedules_message():
         "schedules": [{"box_index": 0, "time_str": "08:30", "disease_name": "降血壓藥"}]
     }
 
-    with patch.object(ble_mod, "_supervisor", mock_supervisor):
+    with patch("nodes.ble_receiver_node._supervisor", mock_supervisor):
         raw = json.dumps({"id": "t4", "type": "schedules"}).encode()
         cmd._handle(raw)
 

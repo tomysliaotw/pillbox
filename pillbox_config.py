@@ -2,8 +2,10 @@
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).resolve().parent
-DB_PATH = PROJECT_DIR / "smart_pillbox.db"
-MEMORY_DB_PATH = PROJECT_DIR / "memory.db"
+DATA_DIR = PROJECT_DIR / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = DATA_DIR / "smart_pillbox.db"
+MEMORY_DB_PATH = DATA_DIR / "memory.db"
 TFDA_ARCHIVE_PATH = PROJECT_DIR / "36_5.json.zip"
 
 BG_DARK = "#0F172A"

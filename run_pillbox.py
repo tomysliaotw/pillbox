@@ -14,16 +14,27 @@ import sys
 import threading
 import tkinter as tk
 
-from agent_supervisor import AgentSupervisor
-from nodes.hardware_node import HardwareNode
-from nodes.health_analysis_node import AITreeAnalyzer
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+from nodes import (
+    AgentSupervisorNode,
+    BLEReceiverNode,
+    HardwareNode,
+    HealthAnalysisNode,
+    UINode,
+    start_ble_server,
+)
 from pillbox_database import initialize_database
 
 
 # ── CLI assistant ─────────────────────────────────────────────────────────────
 
 def run_cli_assistant() -> None:
-    supervisor = AgentSupervisor()
+    supervisor = AgentSupervisorNode()
     print("==================================================")
     print("Smart Pillbox Llama AI Assistant (Memory DB Connected)")
     print("Type your message to set schedules, search drugs, or check vitals.")
@@ -50,7 +61,6 @@ def start_ble_thread(legacy_advertising: bool = False) -> threading.Thread:
     """Launch the BLE GATT server in a daemon thread and return it."""
     def _run():
         try:
-            from flutter_ble_receiver import start_ble_server
             start_ble_server(legacy_advertising=legacy_advertising)
         except ImportError as exc:
             print(
@@ -77,7 +87,7 @@ def main(
     legacy_advertising: bool = False,
 ) -> None:
     initialize_database()
-    analyzer = AITreeAnalyzer()
+    analyzer = HealthAnalysisNode()
     hardware = HardwareNode(analyzer)
     hardware.start()
 
@@ -96,9 +106,8 @@ def main(
         except KeyboardInterrupt:
             return
 
-    from main import SmartPillboxApp
     root = tk.Tk()
-    SmartPillboxApp(root)
+    UINode(root)
     root.mainloop()
 
 
