@@ -36,7 +36,6 @@ class UINode:
         self.assistant_transcript = None
         self.assistant_input = None
         self.assistant_send_button = None
-        self.quick_ai_input = None
         self.supervisor = AgentSupervisorNode()
 
         self.setup_styles()
@@ -209,47 +208,14 @@ class UINode:
         self.assistant_send_button.config(state="normal", text="送出")
         self.assistant_input.focus_set()
 
-    def send_quick_ai_message(self, _event=None) -> str:
-        prompt = self.quick_ai_input.get().strip()
-        if not prompt or prompt == "輸入問題詢問 AI...":
-            return "break"
-        self.quick_ai_input.delete(0, tk.END)
-        self.open_ai_assistant_dialog()
-        self.assistant_input.insert(0, prompt)
-        self.send_assistant_message()
-        return "break"
-
     def build_main_page(self) -> None:
         btn_frame = tk.Frame(self.main_page, bg=BG_DARK)
         btn_frame.pack(side="bottom", fill="x", pady=10, padx=15)
 
-        btn_ai = ttk.Button(btn_frame, text="🤖 AI 助手", style="Primary.TButton", command=self.open_ai_assistant_dialog)
-        btn_ai.pack(side="left", expand=True, fill="x", padx=(0, 2))
         btn_setting = ttk.Button(btn_frame, text="➕ 管理排程", style="Primary.TButton", command=self.switch_to_schedule)
-        btn_setting.pack(side="left", expand=True, fill="x", padx=(2, 2))
+        btn_setting.pack(side="left", expand=True, fill="x", padx=(0, 2))
         btn_take = ttk.Button(btn_frame, text="✔ 確認拿藥", style="Success.TButton", command=self.confirm_medication)
         btn_take.pack(side="right", expand=True, fill="x", padx=(2, 0))
-
-        quick_ai_frame = tk.Frame(self.main_page, bg=BG_DARK)
-        quick_ai_frame.pack(side="bottom", fill="x", padx=15, pady=(0, 4))
-        self.quick_ai_input = tk.Entry(
-            quick_ai_frame,
-            font=("微軟正黑體", 12),
-            bg=BG_PANEL,
-            fg=TEXT_MAIN,
-            insertbackground=TEXT_MAIN,
-            relief="flat",
-        )
-        self.quick_ai_input.pack(side="left", fill="x", expand=True, ipady=8, padx=(0, 8))
-        self.quick_ai_input.insert(0, "輸入問題詢問 AI...")
-        self.quick_ai_input.bind("<FocusIn>", self.clear_quick_ai_placeholder)
-        self.quick_ai_input.bind("<Return>", self.send_quick_ai_message)
-        ttk.Button(
-            quick_ai_frame,
-            text="🤖 詢問 AI",
-            style="Primary.TButton",
-            command=self.send_quick_ai_message,
-        ).pack(side="right")
 
         header_frame = tk.Frame(self.main_page, bg=BG_DARK)
         header_frame.pack(side="top", fill="x", padx=15, pady=(5, 0))
@@ -296,10 +262,6 @@ class UINode:
             ai_panel, text="請將手指輕壓於感測器上方紅光處，\n並保持靜止約 8 秒鐘。", font=("微軟正黑體", 12), bg=BG_PANEL, fg=TEXT_MAIN, wraplength=300, justify="center"
         )
         self.ai_advice_lbl.pack(pady=5, fill="x", padx=10)
-
-    def clear_quick_ai_placeholder(self, _event=None) -> None:
-        if self.quick_ai_input.get() == "輸入問題詢問 AI...":
-            self.quick_ai_input.delete(0, tk.END)
 
     def draw_hightech_bar(self, percentage: float, status: str) -> None:
         self.prog_canvas.delete("bar")

@@ -106,7 +106,11 @@ class LlamaLLMAgent:
             return {"tool": "read_pending_medications", "arguments": {}}
 
         if any(k in lowered for k in ["搜尋", "查藥", "適應症", "search", "drug"]):
-            query = re.sub(r'搜尋|查藥|藥品|search|drug', '', user_input, flags=re.IGNORECASE).strip()
+            # Strip common request wording before querying SQLite.  In
+            # particular, keep "藥物" out of a name such as
+            # "搜尋藥物超力利壓治錠"; otherwise the database search receives
+            # "藥物超力利壓治錠" and misses the intended record.
+            query = re.sub(r'搜尋|查藥|藥品|藥物|適應症|search|drug', '', user_input, flags=re.IGNORECASE).strip()
             return {"tool": "search_drug", "arguments": {"query": query or "aspirin"}}
 
         if any(k in lowered for k in ["確認拿藥", "拿藥", "已吃藥", "confirm"]):
