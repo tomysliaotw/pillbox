@@ -1,36 +1,122 @@
-"""Main entry point for Smart Pillbox application.
+"""Smart Pillbox application bootstrap.
 
-All runtime logic is modularized into nodes inside the `nodes/` package.
-This module re-exports `SmartPillboxApp` (which wraps `UINode`) for backwards compatibility.
+Startup modes
+─────────────
+  python main.py                     GUI + hardware node
+  python main.py --headless          hardware node only (no display)
+  python main.py --ble               GUI + hardware + BLE GATT server
+  python main.py --ble --headless    hardware + BLE only (no display)
+  python main.py --cli-assistant     interactive Llama AI terminal
+  python main.py --ble --legacy-advertising   BLE with btmgmt fallback
 """
-from nodes.ui_node import SmartPillboxApp, UINode
-from pillbox_config import (
-    ACCENT_BLUE,
-    ACCENT_GREEN,
-    ACCENT_RED,
-    ACCENT_YELLOW,
-    BG_DARK,
-    BG_PANEL,
-    TEXT_MAIN,
-    TEXT_SUB,
-    shared_state,
-)
+import argparse
+import sys
+import threading
+import tkinter as tk
 
-__all__ = [
-    "SmartPillboxApp",
-    "UINode",
-    "BG_DARK",
-    "BG_PANEL",
-    "TEXT_MAIN",
-    "TEXT_SUB",
-    "ACCENT_BLUE",
-    "ACCENT_GREEN",
-    "ACCENT_RED",
-    "ACCENT_YELLOW",
-    "shared_state",
-]
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+from nodes import (
+    AgentSupervisorNode,
+    HardwareNode,
+    HealthAnalysisNode,
+    UINode,
+    start_ble_server,
+)
+from pillbox_database import initialize_database
+
+
+def run_cli_assistant() -> None:
+    supervisor = AgentSupervisorNode()
+    print("==================================================")
+    print("Smart Pillbox Llama AI Assistant (Memory DB Connected)")
+    print("Type your message to set schedules, search drugs, or check vitals.")
+    print("Type 'exit' or 'quit' to exit.")
+    print("==================================================")
+    while True:
+        try:
+            user_input = input("\nUser: ").strip()
+            if not user_input:
+                continue
+            if user_input.lower() in ["exit", "quit"]:
+                print("Exiting AI Assistant.")
+                break
+            reply = supervisor.process_user_message(user_input)
+            print(f"\nAI: {reply}")
+        except (KeyboardInterrupt, EOFError):
+            print("\nExiting AI Assistant.")
+            break
+
+
+def start_ble_thread(legacy_advertising: bool = False) -> threading.Thread:
+    """Launch the BLE GATT server in a daemon thread and return it."""
+    def _run():
+        try:
+            start_ble_server(legacy_advertising=legacy_advertising)
+        except ImportError as exc:
+            print(
+                f"[BLE] Cannot start BLE server (missing dependencies: {exc}). "
+                "Install dbus-python and PyGObject on the Raspberry Pi.",
+                file=sys.stderr,
+                flush=True,
+            )
+        except Exception as exc:
+            print(f"[BLE] Server error: {exc}", file=sys.stderr, flush=True)
+
+    thread = threading.Thread(target=_run, name="BLEServer", daemon=True)
+    thread.start()
+    print("[BLE] GATT server thread started.", flush=True)
+    return thread
+
+
+def main(
+    headless: bool = False,
+    cli_assistant: bool = False,
+    ble: bool = False,
+    legacy_advertising: bool = False,
+) -> None:
+    initialize_database()
+    analyzer = HealthAnalysisNode()
+    hardware = HardwareNode(analyzer)
+    hardware.start()
+
+    if ble:
+        start_ble_thread(legacy_advertising=legacy_advertising)
+
+    if cli_assistant:
+        run_cli_assistant()
+        return
+
+    if headless:
+        print("Pillbox running in headless mode. Press Ctrl+C to stop.")
+        try:
+            threading.Event().wait()
+        except KeyboardInterrupt:
+            return
+
+    root = tk.Tk()
+    UINode(root)
+    root.mainloop()
+
 
 if __name__ == "__main__":
-    from run_pillbox import main
-
-    main()
+    parser = argparse.ArgumentParser(
+        description="Run the smart pillbox.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    parser.add_argument("--headless", action="store_true", help="start hardware only; do not open Tkinter")
+    parser.add_argument("--cli-assistant", action="store_true", help="start interactive Llama AI Assistant CLI")
+    parser.add_argument("--ble", action="store_true", help="start BLE GATT server alongside the application")
+    parser.add_argument("--legacy-advertising", action="store_true", help="use btmgmt advertising for Pi 6.18 BLE regression")
+    args = parser.parse_args()
+    main(
+        headless=args.headless,
+        cli_assistant=args.cli_assistant,
+        ble=args.ble,
+        legacy_advertising=args.legacy_advertising,
+    )

@@ -4,18 +4,17 @@ Tests CommandCharacteristic._handle() directly, bypassing real BlueZ/dbus,
 to verify the AgentSupervisor is called and a reply is queued correctly.
 
 Run from the pillbox directory:
-    python test_ble_llm_integration.py
+    python test/test_ble_llm_integration.py
 """
 import sys
 import json
-import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 # ── Stub out dbus so the import works on Windows/non-Pi environments ──────────

@@ -1,7 +1,6 @@
 """BLE GATT peripheral server node for MedAI mobile app communications."""
 from __future__ import annotations
 
-import argparse
 import json
 import subprocess
 import sys

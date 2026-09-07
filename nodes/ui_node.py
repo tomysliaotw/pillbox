@@ -1,8 +1,9 @@
 """UI Node encapsulating the Tkinter medical touch application."""
 from datetime import datetime
 import re
+import threading
 import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import messagebox, ttk
 
 from nodes.agent_supervisor_node import AgentSupervisorNode
 from pillbox_config import (
@@ -31,6 +32,11 @@ class UINode:
         self.db_path = DB_PATH
         self.search_timer = None
         self.active_entry = None
+        self.assistant_window = None
+        self.assistant_transcript = None
+        self.assistant_input = None
+        self.assistant_send_button = None
+        self.quick_ai_input = None
         self.supervisor = AgentSupervisorNode()
 
         self.setup_styles()
@@ -63,14 +69,155 @@ class UINode:
         self.show_keyboard()
 
     def open_ai_assistant_dialog(self) -> None:
-        prompt = simpledialog.askstring(
-            "🤖 Llama AI 醫療語音/對話",
-            "請輸入指令 (例如: 設定 08:30 第 1 格吃降血壓藥 / 查詢生理指標 / 查藥 阿斯匹靈):",
+        if self.assistant_window and self.assistant_window.winfo_exists():
+            self.assistant_window.deiconify()
+            self.assistant_window.lift()
+            self.assistant_input.focus_set()
+            return
+
+        window = tk.Toplevel(self.root)
+        self.assistant_window = window
+        window.title("🤖 Llama AI 醫療助理")
+        window.geometry("680x560")
+        window.minsize(520, 420)
+        window.configure(bg=BG_DARK)
+        window.transient(self.root)
+        window.protocol("WM_DELETE_WINDOW", self.close_ai_assistant)
+
+        header = tk.Frame(window, bg=BG_DARK)
+        header.pack(fill="x", padx=16, pady=(14, 8))
+        tk.Label(
+            header,
+            text="Llama AI 醫療助理",
+            font=("微軟正黑體", 18, "bold"),
+            bg=BG_DARK,
+            fg=TEXT_MAIN,
+        ).pack(side="left")
+        tk.Label(
+            header,
+            text="對話紀錄會自動保存",
+            font=("微軟正黑體", 10),
+            bg=BG_DARK,
+            fg=TEXT_SUB,
+        ).pack(side="right", pady=(5, 0))
+
+        transcript_frame = tk.Frame(window, bg=BG_PANEL)
+        transcript_frame.pack(fill="both", expand=True, padx=16, pady=(0, 10))
+        scrollbar = ttk.Scrollbar(transcript_frame)
+        scrollbar.pack(side="right", fill="y")
+        self.assistant_transcript = tk.Text(
+            transcript_frame,
+            wrap="word",
+            state="disabled",
+            font=("微軟正黑體", 12),
+            bg=BG_PANEL,
+            fg=TEXT_MAIN,
+            insertbackground=TEXT_MAIN,
+            relief="flat",
+            padx=14,
+            pady=12,
+            yscrollcommand=scrollbar.set,
         )
-        if prompt and prompt.strip():
-            reply = self.supervisor.process_user_message(prompt.strip())
+        self.assistant_transcript.pack(fill="both", expand=True)
+        scrollbar.config(command=self.assistant_transcript.yview)
+        self.assistant_transcript.tag_configure("user", foreground=ACCENT_BLUE, spacing1=8)
+        self.assistant_transcript.tag_configure("assistant", foreground=TEXT_MAIN, spacing1=8)
+        self.assistant_transcript.tag_configure("meta", foreground=TEXT_SUB, font=("微軟正黑體", 9))
+
+        input_frame = tk.Frame(window, bg=BG_DARK)
+        input_frame.pack(fill="x", padx=16, pady=(0, 14))
+        self.assistant_input = tk.Entry(
+            input_frame,
+            font=("微軟正黑體", 13),
+            bg=BG_PANEL,
+            fg=TEXT_MAIN,
+            insertbackground=TEXT_MAIN,
+            relief="flat",
+        )
+        self.assistant_input.pack(side="left", fill="x", expand=True, ipady=10, padx=(0, 8))
+        self.assistant_input.bind("<Return>", self.send_assistant_message)
+        self.assistant_send_button = ttk.Button(
+            input_frame,
+            text="送出",
+            style="Primary.TButton",
+            command=self.send_assistant_message,
+        )
+        self.assistant_send_button.pack(side="right")
+
+        self.load_assistant_history()
+        self.assistant_input.focus_set()
+
+    def close_ai_assistant(self) -> None:
+        if self.assistant_window and self.assistant_window.winfo_exists():
+            self.assistant_window.destroy()
+        self.assistant_window = None
+        self.assistant_transcript = None
+        self.assistant_input = None
+        self.assistant_send_button = None
+
+    def append_assistant_message(self, role: str, content: str) -> None:
+        if not self.assistant_transcript:
+            return
+        label = "您" if role == "user" else "AI 助理"
+        self.assistant_transcript.config(state="normal")
+        self.assistant_transcript.insert(tk.END, f"{label}\n", (role,))
+        self.assistant_transcript.insert(tk.END, f"{content.strip()}\n\n", (role,))
+        self.assistant_transcript.config(state="disabled")
+        self.assistant_transcript.see(tk.END)
+
+    def load_assistant_history(self) -> None:
+        history = self.supervisor.memory_manager.get_short_term_memory(limit=50)
+        if not history:
+            self.append_assistant_message("assistant", "您好，我可以協助您查詢生理數據、搜尋藥物或設定服藥提醒。")
+            return
+        for message in history:
+            self.append_assistant_message(message["role"], message["content"])
+
+    def send_assistant_message(self, _event=None) -> str:
+        if not self.assistant_input or not self.assistant_send_button:
+            return "break"
+        prompt = self.assistant_input.get().strip()
+        if not prompt or str(self.assistant_send_button["state"]) == "disabled":
+            return "break"
+
+        self.assistant_input.delete(0, tk.END)
+        self.append_assistant_message("user", prompt)
+        self.assistant_input.config(state="disabled")
+        self.assistant_send_button.config(state="disabled", text="處理中...")
+
+        def process_message() -> None:
+            try:
+                reply = self.supervisor.process_user_message(prompt)
+                error = None
+            except Exception as exc:
+                reply = ""
+                error = str(exc)
+            self.root.after(0, self.finish_assistant_message, reply, error)
+
+        threading.Thread(target=process_message, daemon=True).start()
+        return "break"
+
+    def finish_assistant_message(self, reply: str, error: str | None) -> None:
+        if not self.assistant_window or not self.assistant_window.winfo_exists():
+            return
+        if error:
+            self.append_assistant_message("assistant", f"處理訊息時發生錯誤：{error}")
+        else:
+            self.append_assistant_message("assistant", reply)
             self.refresh_upcoming_schedule()
-            messagebox.showinfo("🤖 AI 回應", reply)
+        self.assistant_input.config(state="normal")
+        self.assistant_send_button.config(state="normal", text="送出")
+        self.assistant_input.focus_set()
+
+    def send_quick_ai_message(self, _event=None) -> str:
+        prompt = self.quick_ai_input.get().strip()
+        if not prompt or prompt == "輸入問題詢問 AI...":
+            return "break"
+        self.quick_ai_input.delete(0, tk.END)
+        self.open_ai_assistant_dialog()
+        self.assistant_input.insert(0, prompt)
+        self.send_assistant_message()
+        return "break"
 
     def build_main_page(self) -> None:
         btn_frame = tk.Frame(self.main_page, bg=BG_DARK)
@@ -82,6 +229,27 @@ class UINode:
         btn_setting.pack(side="left", expand=True, fill="x", padx=(2, 2))
         btn_take = ttk.Button(btn_frame, text="✔ 確認拿藥", style="Success.TButton", command=self.confirm_medication)
         btn_take.pack(side="right", expand=True, fill="x", padx=(2, 0))
+
+        quick_ai_frame = tk.Frame(self.main_page, bg=BG_DARK)
+        quick_ai_frame.pack(side="bottom", fill="x", padx=15, pady=(0, 4))
+        self.quick_ai_input = tk.Entry(
+            quick_ai_frame,
+            font=("微軟正黑體", 12),
+            bg=BG_PANEL,
+            fg=TEXT_MAIN,
+            insertbackground=TEXT_MAIN,
+            relief="flat",
+        )
+        self.quick_ai_input.pack(side="left", fill="x", expand=True, ipady=8, padx=(0, 8))
+        self.quick_ai_input.insert(0, "輸入問題詢問 AI...")
+        self.quick_ai_input.bind("<FocusIn>", self.clear_quick_ai_placeholder)
+        self.quick_ai_input.bind("<Return>", self.send_quick_ai_message)
+        ttk.Button(
+            quick_ai_frame,
+            text="🤖 詢問 AI",
+            style="Primary.TButton",
+            command=self.send_quick_ai_message,
+        ).pack(side="right")
 
         header_frame = tk.Frame(self.main_page, bg=BG_DARK)
         header_frame.pack(side="top", fill="x", padx=15, pady=(5, 0))
@@ -128,6 +296,10 @@ class UINode:
             ai_panel, text="請將手指輕壓於感測器上方紅光處，\n並保持靜止約 8 秒鐘。", font=("微軟正黑體", 12), bg=BG_PANEL, fg=TEXT_MAIN, wraplength=300, justify="center"
         )
         self.ai_advice_lbl.pack(pady=5, fill="x", padx=10)
+
+    def clear_quick_ai_placeholder(self, _event=None) -> None:
+        if self.quick_ai_input.get() == "輸入問題詢問 AI...":
+            self.quick_ai_input.delete(0, tk.END)
 
     def draw_hightech_bar(self, percentage: float, status: str) -> None:
         self.prog_canvas.delete("bar")
