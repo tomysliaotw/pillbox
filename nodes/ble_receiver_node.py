@@ -316,12 +316,14 @@ def find_adapter(bus):
     raise RuntimeError("No Bluetooth adapter with GATT and advertising support found.")
 
 
-def raise_error(error: Exception) -> None:
-    raise RuntimeError(str(error))
+def raise_error(error: Exception, operation: str = "BlueZ operation") -> None:
+    """Surface asynchronous BlueZ errors in the terminal with useful context."""
+    raise RuntimeError(f"{operation} failed: {error}")
 
 
 def register_legacy_advertisement() -> None:
-    command = ["btmgmt", "add-adv", "-u", SERVICE_UUID, "-c", "-g"]
+    # btmgmt requires a non-zero advertising-instance ID as its final argument.
+    command = ["btmgmt", "add-adv", "-u", SERVICE_UUID, "-c", "-g", "1"]
     result = subprocess.run(command, text=True, capture_output=True, check=False)
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip() or "unknown btmgmt error"
@@ -329,7 +331,10 @@ def register_legacy_advertisement() -> None:
     print("Advertising through btmgmt legacy mode", flush=True)
 
 
-def start_ble_server(legacy_advertising: bool = False) -> None:
+def start_ble_server(
+    legacy_advertising: bool = False,
+    fallback_to_legacy_advertising: bool = True,
+) -> None:
     if dbus is None:
         raise RuntimeError("dbus-python and PyGObject are required to run the BLE server.")
     threading.Thread(target=_get_supervisor, daemon=True).start()
@@ -346,21 +351,51 @@ def start_ble_server(legacy_advertising: bool = False) -> None:
     application.add_service(service)
     advertisement = Advertisement(bus)
 
+    def on_gatt_error(error: Exception) -> None:
+        raise_error(error, "GATT application registration")
+
+    legacy_started = False
+
+    def start_legacy_advertising() -> None:
+        nonlocal legacy_started
+        if legacy_started:
+            return
+        register_legacy_advertisement()
+        legacy_started = True
+
+    def on_advertising_error(error: Exception) -> None:
+        # Some Raspberry Pi/BlueZ combinations expose an advertising manager but
+        # reject its D-Bus registration.  The older receiver worked around this
+        # by adding the same service UUID with btmgmt, so retain that path.
+        print(f"[BLE] BlueZ advertisement registration failed: {error}", file=sys.stderr, flush=True)
+        if not fallback_to_legacy_advertising:
+            raise_error(error, "BLE advertisement registration")
+        print("[BLE] Falling back to btmgmt advertising.", flush=True)
+        try:
+            start_legacy_advertising()
+        except Exception as fallback_error:
+            raise RuntimeError(
+                f"BLE advertisement registration failed ({error}); "
+                f"legacy fallback also failed: {fallback_error}"
+            ) from fallback_error
+
     dbus.Interface(adapter, GATT_MANAGER_IFACE).RegisterApplication(
         application.get_path(),
         {},
         reply_handler=lambda: print("GATT service registered", flush=True),
-        error_handler=raise_error,
+        error_handler=on_gatt_error,
     )
 
     if legacy_advertising:
-        register_legacy_advertisement()
+        print("[BLE] Using requested btmgmt legacy advertising mode.", flush=True)
+        start_legacy_advertising()
     else:
+        print("[BLE] Registering advertisement through BlueZ.", flush=True)
         dbus.Interface(adapter, ADVERTISING_MANAGER_IFACE).RegisterAdvertisement(
             advertisement.get_path(),
             {},
             reply_handler=lambda: print(f"Advertising as {DEVICE_NAME}", flush=True),
-            error_handler=raise_error,
+            error_handler=on_advertising_error,
         )
 
     print("Waiting for a Flutter app to connect...", flush=True)
